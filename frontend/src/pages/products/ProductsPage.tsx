@@ -16,9 +16,9 @@ import {
   TextInput,
   Title,
 } from '@mantine/core'
-import { AlertCircle, Plus, Search, Pencil } from 'lucide-react'
+import { AlertCircle, Plus, Search, Pencil, Trash2 } from 'lucide-react'
 
-import { apiGet, apiPost } from '../../services/api'
+import { apiGet, apiPost, apiPut, apiDelete } from '../../services/api'
 import { formatCurrency } from '../../utils/format'
 import type { Products, ProductsListResponse } from '../../types/products'
 
@@ -30,307 +30,514 @@ interface ProductFormValues {
 }
 
 function ProductsPage() {
-  const [products, setProducts] = useState<ProductsListResponse | null>(null)
-  const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+    const [products, setProducts] = useState<ProductsListResponse | null>(null)
+    const [search, setSearch] = useState('')
+    const [page, setPage] = useState(1)
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState<string | null>(null)
 
-  const [createOpened, setCreateOpened] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
-  const [refresh, setRefresh] = useState(0)
+    const [createOpened, setCreateOpened] = useState(false)
+    const [saving, setSaving] = useState(false)
+    const [createError, setCreateError] = useState<string | null>(null)
+    const [refresh, setRefresh] = useState(0)
 
-  const limit = 10
+    const [editOpened, setEditOpened] = useState(false)
+    const [selectedProduct, setSelectedProduct] = useState<Products | null>(null)
+    const [editError, setEditError] = useState<string | null>(null)
 
-  const form = useForm<ProductFormValues>({
-    mode: 'controlled',
-    initialValues: {
-      sku: '',
-      name: '',
-      price: 0,
-      stock: 0,
-    },
-    validate: {
-      sku: (value) =>
-        value.trim().length === 0 ? 'SKU is required' : null,
-      name: (value) =>
-        value.trim().length === 0 ? 'Product name is required' : null,
-      price: (value) =>
-        Number.isInteger(Number(value)) && Number(value) >= 0
-          ? null
-          : 'Price must be a non-negative integer',
-      stock: (value) =>
-        Number.isInteger(Number(value)) && Number(value) >= 0
-          ? null
-          : 'Stock must be a non-negative integer',
-    },
-  })
+    const [deleteError, setDeleteError] = useState<string | null>(null)
+    const [deleting, setDeleting] = useState(false)
+    const [deleteTarget, setDeleteTarget] = useState<Products | null>(null)
 
-  useEffect(() => {
-    let active = true
+    const limit = 10
 
-    const loadProducts = async () => {
-      try {
-        setLoading(true)
-        setError(null)
+    const form = useForm<ProductFormValues>({
+        mode: 'controlled',
+        initialValues: {
+        sku: '',
+        name: '',
+        price: 0,
+        stock: 0,
+        },
+        validate: {
+        sku: (value) =>
+            value.trim().length === 0 ? 'SKU is required' : null,
+        name: (value) =>
+            value.trim().length === 0 ? 'Product name is required' : null,
+        price: (value) =>
+            Number.isInteger(Number(value)) && Number(value) >= 0
+            ? null
+            : 'Price must be a non-negative integer',
+        stock: (value) =>
+            Number.isInteger(Number(value)) && Number(value) >= 0
+            ? null
+            : 'Stock must be a non-negative integer',
+        },
+    })
 
-        const params = new URLSearchParams({
-          search,
-          page: String(page),
-          limit: String(limit),
+    useEffect(() => {
+        let active = true
+
+        const loadProducts = async () => {
+        try {
+            setLoading(true)
+            setError(null)
+
+            const params = new URLSearchParams({
+            search,
+            page: String(page),
+            limit: String(limit),
+            })
+
+            const data = await apiGet<ProductsListResponse>(
+            `/api/products?${params.toString()}`,
+            )
+
+            if (active) {
+            setProducts(data)
+            }
+        } catch (err) {
+            if (active) {
+            setError(
+                err instanceof Error
+                ? err.message
+                : 'Failed to load products',
+            )
+            }
+        } finally {
+            if (active) {
+            setLoading(false)
+            }
+        }
+        }
+
+        void loadProducts()
+
+        return () => {
+        active = false
+        }
+    }, [search, page, refresh])
+
+    const handleCreateProduct = async (values: ProductFormValues) => {
+        try {
+        setSaving(true)
+        setCreateError(null)
+
+        await apiPost<Products>('/api/products', {
+            sku: values.sku.trim(),
+            name: values.name.trim(),
+            price: Number(values.price),
+            stock: Number(values.stock),
         })
 
-        const data = await apiGet<ProductsListResponse>(
-          `/api/products?${params.toString()}`,
+        form.reset()
+        setCreateOpened(false)
+        setPage(1)
+        setRefresh((current) => current + 1)
+        } catch (err) {
+        setCreateError(
+            err instanceof Error ? err.message : 'Failed to create product',
         )
-
-        if (active) {
-          setProducts(data)
+        } finally {
+        setSaving(false)
         }
-      } catch (err) {
-        if (active) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : 'Failed to load products',
-          )
-        }
-      } finally {
-        if (active) {
-          setLoading(false)
-        }
-      }
     }
 
-    void loadProducts()
+    const handleEditProduct = async (values: ProductFormValues) => {
+        if (!selectedProduct) return
 
-    return () => {
-      active = false
+        try {
+            setSaving(true)
+            setEditError(null)
+
+            await apiPut<Products>(
+            `/api/products/${selectedProduct.id}`,
+            {
+                sku: values.sku.trim(),
+                name: values.name.trim(),
+                price: Number(values.price),
+            },
+            )
+
+            setEditOpened(false)
+            setSelectedProduct(null)
+            form.reset()
+            setRefresh((current) => current + 1)
+        } catch (err) {
+            setEditError(
+            err instanceof Error ? err.message : 'Failed to update product',
+            )
+        } finally {
+            setSaving(false)
+        }
     }
-  }, [search, page, refresh])
 
-  const handleCreateProduct = async (values: ProductFormValues) => {
-    try {
-      setSaving(true)
-      setCreateError(null)
+    const handleDeleteProduct = async () => {
+        if (!deleteTarget) return
 
-      await apiPost<Products>('/api/products', {
-        sku: values.sku.trim(),
-        name: values.name.trim(),
-        price: Number(values.price),
-        stock: Number(values.stock),
-      })
+        try {
+            setDeleting(true)
+            setDeleteError(null)
 
-      form.reset()
-      setCreateOpened(false)
-      setPage(1)
-      setRefresh((current) => current + 1)
-    } catch (err) {
-      setCreateError(
-        err instanceof Error ? err.message : 'Failed to create product',
-      )
-    } finally {
-      setSaving(false)
+            await apiDelete(`/api/products/${deleteTarget.id}`)
+
+            setDeleteTarget(null)
+            setRefresh((current) => current + 1)
+        } catch (err) {
+            setDeleteError(
+            err instanceof Error ? err.message : 'Failed to delete product',
+            )
+        } finally {
+            setDeleting(false)
+        }
     }
-  }
 
-  const totalPages = products
-    ? Math.ceil(products.total / limit)
-    : 0
+    const totalPages = products
+        ? Math.ceil(products.total / limit)
+        : 0
 
-  return (
-    <Stack gap="lg">
-      <Group justify="space-between" align="flex-end">
-        <div>
-          <Title order={2}>Products</Title>
-          <Text c="dimmed" size="sm" mt={4}>
-            Manage and monitor your inventory products.
-          </Text>
-        </div>
-
-        <Button
-          leftSection={<Plus size={16} />}
-          onClick={() => {
-            setCreateError(null)
-            setCreateOpened(true)
-          }}
-        >
-          Add Product
-        </Button>
-      </Group>
-
-      <Card withBorder radius="md" padding="lg">
-        <Stack gap="md">
-          <Group justify="space-between">
-            <Text fw={600}>Product List</Text>
-
-            <Text size="sm" c="dimmed">
-              {products?.total ?? 0} products
+    return (
+        <Stack gap="lg">
+        <Group justify="space-between" align="flex-end">
+            <div>
+            <Title order={2}>Products</Title>
+            <Text c="dimmed" size="sm" mt={4}>
+                Manage and monitor your inventory products.
             </Text>
-          </Group>
+            </div>
 
-          <TextInput
-            placeholder="Search by SKU or product name..."
-            leftSection={<Search size={16} />}
-            value={search}
-            onChange={(event) => {
-              setSearch(event.currentTarget.value)
-              setPage(1)
+            <Button
+            leftSection={<Plus size={16} />}
+            onClick={() => {
+                setCreateError(null)
+                setCreateOpened(true)
             }}
-          />
-
-          {loading && (
-            <Group justify="center" py="xl">
-              <Loader size="sm" />
-              <Text size="sm" c="dimmed">
-                Loading products...
-              </Text>
-            </Group>
-          )}
-
-          {!loading && error && (
-            <Alert
-              color="red"
-              icon={<AlertCircle size={18} />}
-              title="Failed to load products"
             >
-              {error}
-            </Alert>
-          )}
+            Add Product
+            </Button>
+        </Group>
 
-          {!loading && !error && products && (
-            <>
-              {products.data.length === 0 ? (
-                <Text c="dimmed" ta="center" py="xl">
-                  No products found.
+        <Card withBorder radius="md" padding="lg">
+            <Stack gap="md">
+            <Group justify="space-between">
+                <Text fw={600}>Product List</Text>
+
+                <Text size="sm" c="dimmed">
+                {products?.total ?? 0} products
                 </Text>
-              ) : (
-                <Table.ScrollContainer minWidth={700}>
-                  <Table verticalSpacing="md" highlightOnHover>
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th>SKU</Table.Th>
-                        <Table.Th>Product Name</Table.Th>
-                        <Table.Th>Price</Table.Th>
-                        <Table.Th>Stock</Table.Th>
-                        <Table.Th>Status</Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
+            </Group>
 
-                    <Table.Tbody>
-                      {products.data.map((product) => (
-                        <Table.Tr key={product.id}>
-                          <Table.Td>
-                            <Text fw={500} size="sm">
-                              {product.sku}
-                            </Text>
-                          </Table.Td>
+            <TextInput
+                placeholder="Search by SKU or product name..."
+                leftSection={<Search size={16} />}
+                value={search}
+                onChange={(event) => {
+                setSearch(event.currentTarget.value)
+                setPage(1)
+                }}
+            />
 
-                          <Table.Td>{product.name}</Table.Td>
-                          <Table.Td>{formatCurrency(product.price)}</Table.Td>
-                          <Table.Td>{product.stock}</Table.Td>
-
-                          <Table.Td>
-                            <Badge
-                              color={product.is_active ? 'green' : 'gray'}
-                              variant="light"
-                            >
-                              {product.is_active ? 'Active' : 'Inactive'}
-                            </Badge>
-                          </Table.Td>
-                        </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
-                </Table.ScrollContainer>
-              )}
-
-              {totalPages > 1 && (
-                <Group justify="flex-end">
-                  <Pagination
-                    value={page}
-                    onChange={setPage}
-                    total={totalPages}
-                  />
+            {loading && (
+                <Group justify="center" py="xl">
+                <Loader size="sm" />
+                <Text size="sm" c="dimmed">
+                    Loading products...
+                </Text>
                 </Group>
-              )}
-            </>
-          )}
-        </Stack>
-      </Card>
-
-      <Modal
-        opened={createOpened}
-        onClose={() => {
-          setCreateOpened(false)
-          setCreateError(null)
-          form.reset()
-        }}
-        title="Add New Product"
-        centered
-      >
-        <form onSubmit={form.onSubmit(handleCreateProduct)}>
-          <Stack gap="md">
-            {createError && (
-              <Alert color="red" icon={<AlertCircle size={18} />}>
-                {createError}
-              </Alert>
             )}
 
-            <TextInput
-              label="SKU"
-              placeholder="e.g. SKU-013"
-              required
-              {...form.getInputProps('sku')}
-            />
+            {!loading && error && (
+                <Alert
+                color="red"
+                icon={<AlertCircle size={18} />}
+                title="Failed to load products"
+                >
+                {error}
+                </Alert>
+            )}
 
-            <TextInput
-              label="Product Name"
-              placeholder="Enter product name"
-              required
-              {...form.getInputProps('name')}
-            />
+            {!loading && !error && products && (
+                <>
+                {products.data.length === 0 ? (
+                    <Text c="dimmed" ta="center" py="xl">
+                    No products found.
+                    </Text>
+                ) : (
+                    <Table.ScrollContainer minWidth={700}>
+                    <Table verticalSpacing="md" highlightOnHover>
+                        <Table.Thead>
+                        <Table.Tr>
+                            <Table.Th>SKU</Table.Th>
+                            <Table.Th>Product Name</Table.Th>
+                            <Table.Th>Price</Table.Th>
+                            <Table.Th>Stock</Table.Th>
+                            <Table.Th>Status</Table.Th>
+                            <Table.Th>Action</Table.Th>
+                        </Table.Tr>
+                        </Table.Thead>
 
-            <NumberInput
-              label="Price (IDR)"
-              placeholder="Enter product price"
-              min={0}
-              allowDecimal={false}
-              required
-              {...form.getInputProps('price')}
-            />
+                        <Table.Tbody>
+                        {products.data.map((product) => (
+                            <Table.Tr key={product.id}>
+                            <Table.Td>
+                                <Text fw={500} size="sm">
+                                {product.sku}
+                                </Text>
+                            </Table.Td>
 
-            <NumberInput
-              label="Initial Stock"
-              placeholder="Enter initial stock"
-              min={0}
-              allowDecimal={false}
-              required
-              {...form.getInputProps('stock')}
-            />
+                            <Table.Td>{product.name}</Table.Td>
+                            <Table.Td>{formatCurrency(product.price)}</Table.Td>
+                            <Table.Td>{product.stock}</Table.Td>
 
-            <Group justify="flex-end" mt="sm">
-              <Button
-                variant="default"
-                onClick={() => {
-                  setCreateOpened(false)
-                  setCreateError(null)
-                  form.reset()
-                }}
-              >
-                Cancel
-              </Button>
+                            <Table.Td>
+                                <Badge
+                                color={product.is_active ? 'green' : 'gray'}
+                                variant="light"
+                                >
+                                {product.is_active ? 'Active' : 'Inactive'}
+                                </Badge>
+                            </Table.Td>
 
-              <Button type="submit" loading={saving}>
-                Create Product
-              </Button>
-            </Group>
-          </Stack>
-        </form>
-      </Modal>
-    </Stack>
-  )
+                            <Table.Td>
+                                <Group gap="xs">
+                                    <Button
+                                        variant="light"
+                                        size="xs"
+                                        leftSection={<Pencil size={14} />}
+                                        onClick={() => {
+                                        setSelectedProduct(product)
+                                        setEditError(null)
+
+                                        form.setValues({
+                                            sku: product.sku,
+                                            name: product.name,
+                                            price: product.price,
+                                            stock: product.stock,
+                                        })
+
+                                        setEditOpened(true)
+                                        }}
+                                    >
+                                        Edit
+                                    </Button>
+
+                                    <Button
+                                        variant="light"
+                                        color="red"
+                                        size="xs"
+                                        leftSection={<Trash2 size={14} />}
+                                        onClick={() => {
+                                            setDeleteTarget(product)
+                                            setDeleteError(null)
+                                        }}
+                                    >
+                                        Delete
+                                    </Button>
+                                </Group>
+                            </Table.Td>
+                            </Table.Tr>
+                        ))}
+                        </Table.Tbody>
+                    </Table>
+                    </Table.ScrollContainer>
+                )}
+
+                {totalPages > 1 && (
+                    <Group justify="flex-end">
+                    <Pagination
+                        value={page}
+                        onChange={setPage}
+                        total={totalPages}
+                    />
+                    </Group>
+                )}
+                </>
+            )}
+            </Stack>
+        </Card>
+
+        <Modal
+            opened={createOpened}
+            onClose={() => {
+            setCreateOpened(false)
+            setCreateError(null)
+            form.reset()
+            }}
+            title="Add New Product"
+            centered
+        >
+            <form onSubmit={form.onSubmit(handleCreateProduct)}>
+            <Stack gap="md">
+                {createError && (
+                <Alert color="red" icon={<AlertCircle size={18} />}>
+                    {createError}
+                </Alert>
+                )}
+
+                <TextInput
+                label="SKU"
+                placeholder="e.g. SKU-013"
+                required
+                {...form.getInputProps('sku')}
+                />
+
+                <TextInput
+                label="Product Name"
+                placeholder="Enter product name"
+                required
+                {...form.getInputProps('name')}
+                />
+
+                <NumberInput
+                label="Price (IDR)"
+                placeholder="Enter product price"
+                min={0}
+                allowDecimal={false}
+                required
+                {...form.getInputProps('price')}
+                />
+
+                <NumberInput
+                label="Initial Stock"
+                placeholder="Enter initial stock"
+                min={0}
+                allowDecimal={false}
+                required
+                {...form.getInputProps('stock')}
+                />
+
+                <Group justify="flex-end" mt="sm">
+                <Button
+                    variant="default"
+                    onClick={() => {
+                    setCreateOpened(false)
+                    setCreateError(null)
+                    form.reset()
+                    }}
+                >
+                    Cancel
+                </Button>
+
+                <Button type="submit" loading={saving}>
+                    Create Product
+                </Button>
+                </Group>
+            </Stack>
+            </form>
+        </Modal>
+
+        <Modal
+            opened={editOpened}
+            onClose={() => {
+                setEditOpened(false)
+                setSelectedProduct(null)
+                setEditError(null)
+                form.reset()
+            }}
+            title="Edit Product"
+            centered
+            >
+            <form onSubmit={form.onSubmit(handleEditProduct)}>
+                <Stack gap="md">
+                {editError && (
+                    <Alert color="red" icon={<AlertCircle size={18} />}>
+                    {editError}
+                    </Alert>
+                )}
+
+                <TextInput
+                    label="SKU"
+                    required
+                    {...form.getInputProps('sku')}
+                />
+
+                <TextInput
+                    label="Product Name"
+                    required
+                    {...form.getInputProps('name')}
+                />
+
+                <NumberInput
+                    label="Price (IDR)"
+                    min={0}
+                    allowDecimal={false}
+                    required
+                    {...form.getInputProps('price')}
+                />
+
+                <Group justify="flex-end" mt="sm">
+                    <Button
+                    variant="default"
+                    onClick={() => {
+                        setEditOpened(false)
+                        setSelectedProduct(null)
+                        setEditError(null)
+                        form.reset()
+                    }}
+                    >
+                    Cancel
+                    </Button>
+
+                    <Button type="submit" loading={saving}>
+                    Save Changes
+                    </Button>
+                </Group>
+                </Stack>
+            </form>
+        </Modal>
+
+        <Modal
+            opened={deleteTarget !== null}
+            onClose={() => {
+                setDeleteTarget(null)
+                setDeleteError(null)
+            }}
+            title="Delete Product"
+            centered
+        >
+            <Stack gap="md">
+                {deleteError && (
+                <Alert color="red" icon={<AlertCircle size={18} />}>
+                    {deleteError}
+                </Alert>
+                )}
+
+                <Text>
+                Are you sure you want to delete{' '}
+                <Text component="span" fw={600}>
+                    {deleteTarget?.name}
+                </Text>
+                ?
+                </Text>
+
+                <Text size="sm" c="dimmed">
+                This action cannot be undone.
+                </Text>
+
+                <Group justify="flex-end">
+                <Button
+                    variant="default"
+                    onClick={() => {
+                    setDeleteTarget(null)
+                    setDeleteError(null)
+                    }}
+                >
+                    Cancel
+                </Button>
+
+                <Button
+                    color="red"
+                    loading={deleting}
+                    onClick={handleDeleteProduct}
+                >
+                    Delete Product
+                </Button>
+                </Group>
+            </Stack>
+        </Modal>
+
+        </Stack>
+    )
 }
 
 export default ProductsPage

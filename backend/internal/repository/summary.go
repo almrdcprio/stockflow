@@ -32,7 +32,7 @@ func (r *SummaryRepository) GetSummary(
             COUNT(*),
             COUNT(*) FILTER (WHERE is_active = TRUE),
             COALESCE(SUM(price::BIGINT * stock::BIGINT), 0),
-            COUNT(*) FILTER (WHERE stock <= 25)
+            COUNT(*) FILTER (WHERE stock <= 10)
         FROM products
     `).Scan(
 		&summary.TotalProducts,

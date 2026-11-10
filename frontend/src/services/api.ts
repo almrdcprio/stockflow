@@ -59,3 +59,17 @@ export async function apiPut<T>(
 
   return result as T
 }
+
+export async function apiDelete(path: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'DELETE',
+  })
+
+  if (!response.ok) {
+    const result = await response.json().catch(() => null)
+    const message =
+      result?.error?.message ?? `Request failed (${response.status})`
+
+    throw new Error(message)
+  }
+}

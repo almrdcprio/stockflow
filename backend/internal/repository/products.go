@@ -50,6 +50,7 @@ func NewProductRepository(db *pgxpool.Pool) *ProductRepository {
 func (r *ProductRepository) GetProducts(
 	ctx context.Context,
 	search string,
+	status string,
 	page int,
 	limit int,
 ) ([]Product, int, error) {
@@ -71,11 +72,24 @@ func (r *ProductRepository) GetProducts(
 		or p.sku ilike '%' || $1 || '%'
 		or p.name ilike '%' || $1 || '%'
 	)
+	and (
+		$2 = 'all'
+        or ($2 = 'active' AND p.is_active = TRUE)
+        or ($2 = 'inactive' AND p.is_active = FALSE)
+        or ($2 = 'low_stock' AND p.stock <= 10)
+	)
 	group by p.id
 	order by p.id asc
-	limit $2 offset $3
+	limit $3 offset $4
 	`
-	rows, err := r.db.Query(ctx, query, search, limit, offset)
+	rows, err := r.db.Query(
+		ctx,
+		query,
+		search,
+		status,
+		limit,
+		offset,
+	)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -112,9 +126,20 @@ func (r *ProductRepository) GetProducts(
 			or p.sku ilike '%' || $1 || '%'
 			or p.name ilike '%' || $1 || '%'
 		)
+		and (
+			$2 = 'all'
+            or ($2 = 'active' AND p.is_active = TRUE)
+            or ($2 = 'inactive' AND p.is_active = FALSE)
+            or ($2 = 'low_stock' AND p.stock <= 10)
+		)
 	`
 
-	err = r.db.QueryRow(ctx, countQuery, search).Scan(&totalCount)
+	err = r.db.QueryRow(
+		ctx,
+		countQuery,
+		search,
+		status,
+	).Scan(&totalCount)
 	if err != nil {
 		return nil, 0, err
 	}

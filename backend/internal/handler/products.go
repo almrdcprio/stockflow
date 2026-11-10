@@ -42,10 +42,29 @@ type AdjustStockRequest struct {
 }
 
 func (h *productHandler) ListProducts(
-	w http.ResponseWriter, r *http.Request,
+	w http.ResponseWriter,
+	r *http.Request,
 ) {
 	query := r.URL.Query()
 	search := strings.TrimSpace(query.Get("search"))
+
+	status := query.Get("status")
+	if status == "" {
+		status = "all"
+	}
+
+	validStatus := map[string]bool{
+		"all":       true,
+		"active":    true,
+		"inactive":  true,
+		"low_stock": true,
+	}
+
+	if !validStatus[status] {
+		http.Error(w, "invalid status parameter", http.StatusBadRequest)
+		return
+	}
+
 	page := 1
 	limit := 10
 
@@ -64,11 +83,14 @@ func (h *productHandler) ListProducts(
 			http.Error(w, "invalid limit parameter", http.StatusBadRequest)
 			return
 		}
+
+		limit = parsed
 	}
 
 	products, total, err := h.repo.GetProducts(
 		r.Context(),
 		search,
+		status,
 		page,
 		limit,
 	)
