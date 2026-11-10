@@ -33,6 +33,10 @@ func main() {
 	router := chi.NewRouter()
 	productRepo := repository.NewProductRepository(pool)
 	productHandler := handler.NewProductHandler(productRepo)
+	orderRepo := repository.NewOrderRepository(pool)
+	orderHandler := handler.NewOrderHandler(orderRepo)
+	summaryRepo := repository.NewSummaryRepository(pool)
+	summaryHandler := handler.NewSummaryHandler(summaryRepo)
 
 	router.Get("/api/products", productHandler.ListProducts)
 	router.Post("/api/products", productHandler.CreateProduct)
@@ -41,6 +45,12 @@ func main() {
 
 	router.Post("/api/products/{id}/stock", productHandler.AdjustStock)
 	router.Get("/api/products/{id}/movements", productHandler.GetMovements)
+
+	router.Post("/api/orders", orderHandler.CreateOrder)
+	router.Get("/api/orders/{id}", orderHandler.GetOrder)
+	router.Post("/api/orders/{id}/cancel", orderHandler.CancelOrder)
+
+	router.Get("/api/dashboard/summary", summaryHandler.GetSummary)
 
 	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		response := map[string]string{

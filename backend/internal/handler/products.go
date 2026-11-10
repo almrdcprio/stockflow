@@ -193,17 +193,17 @@ func (h *productHandler) UpdateProduct(
 
 	if err != nil {
 		if errors.Is(err, repository.ErrProductNotFound) {
-			http.Error(w, "Product not found", http.StatusNotFound)
+			respondError(w, http.StatusNotFound, "PRODUCT_NOT_FOUND", "Product not found")
 			return
 		}
 
 		if errors.Is(err, repository.ErrDuplicateSKU) {
-			http.Error(w, "Product SKU already exists", http.StatusConflict)
+			respondError(w, http.StatusConflict, "DUPLICATE_SKU", "Product SKU already exists")
 			return
 		}
 
 		log.Printf("failed to update product: %v", err)
-		http.Error(w, "failed to update product", http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
 
