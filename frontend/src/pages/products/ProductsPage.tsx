@@ -15,11 +15,11 @@ import {
   Text,
   TextInput,
   Title,
+  SegmentedControl,
 } from '@mantine/core'
 import { AlertCircle, Plus, Search, Pencil, Trash2 } from 'lucide-react'
-
 import { apiGet, apiPost, apiPut, apiDelete } from '../../services/api'
-import { formatCurrency } from '../../utils/format'
+import { formatCurrency, formatRelativeTime } from '../../utils/format'
 import type { Products, ProductsListResponse } from '../../types/products'
 
 interface ProductFormValues {
@@ -49,6 +49,10 @@ function ProductsPage() {
     const [deleting, setDeleting] = useState(false)
     const [deleteTarget, setDeleteTarget] = useState<Products | null>(null)
 
+    type ProductStatus = 'all' | 'active' | 'inactive' | 'low_stock'
+    const [status, setStatus] = useState<ProductStatus>('all')
+    const [debouncedSearch, setDebouncedSearch] = useState('')
+
     const limit = 10
 
     const form = useForm<ProductFormValues>({
@@ -76,6 +80,14 @@ function ProductsPage() {
     })
 
     useEffect(() => {
+        const timeout = setTimeout(() => {
+            setDebouncedSearch(search)
+        }, 400)
+
+        return () => clearTimeout(timeout)
+    }, [search])
+
+    useEffect(() => {
         let active = true
 
         const loadProducts = async () => {
@@ -84,7 +96,8 @@ function ProductsPage() {
             setError(null)
 
             const params = new URLSearchParams({
-            search,
+            search: debouncedSearch,
+            status,
             page: String(page),
             limit: String(limit),
             })
@@ -116,7 +129,7 @@ function ProductsPage() {
         return () => {
         active = false
         }
-    }, [search, page, refresh])
+    }, [debouncedSearch, status, page, refresh])
 
     const handleCreateProduct = async (values: ProductFormValues) => {
         try {
@@ -237,12 +250,34 @@ function ProductsPage() {
                 }}
             />
 
+            <SegmentedControl
+                value={status}
+                onChange={(value) => {
+                    setStatus(value as ProductStatus)
+                    setPage(1)
+                }}
+                data={[
+                    { label: 'All', value: 'all' },
+                    { label: 'Active', value: 'active' },
+                    { label: 'Inactive', value: 'inactive' },
+                    { label: 'Low Stock (≤ 10)', value: 'low_stock' },
+                ]}
+            />
+
             {loading && (
                 <Group justify="center" py="xl">
                 <Loader size="sm" />
                 <Text size="sm" c="dimmed">
                     Loading products...
                 </Text>
+
+                <Button
+                    variant="light"
+                    size="xs"
+                    onClick={() => setRefresh((current) => current + 1)}
+                    >
+                    Retry
+                </Button>
                 </Group>
             )}
 
@@ -272,6 +307,7 @@ function ProductsPage() {
                             <Table.Th>Price</Table.Th>
                             <Table.Th>Stock</Table.Th>
                             <Table.Th>Status</Table.Th>
+                            <Table.Th>Last Movement</Table.Th>
                             <Table.Th>Action</Table.Th>
                         </Table.Tr>
                         </Table.Thead>
@@ -296,6 +332,12 @@ function ProductsPage() {
                                 >
                                 {product.is_active ? 'Active' : 'Inactive'}
                                 </Badge>
+                            </Table.Td>
+
+                            <Table.Td>
+                                <Text size="sm" c="dimmed">
+                                    {formatRelativeTime(product.last_movement_at)}
+                                </Text>
                             </Table.Td>
 
                             <Table.Td>
