@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,6 +20,8 @@ var ErrDuplicateSKU = errors.New("Products with the same SKU already exists")
 var ErrProductNotFound = errors.New("Product not found")
 var ErrProductHasHistory = errors.New("Product has stock movement history and cannot be deleted")
 
+var ErrInsufficientStock = errors.New("Insufficient stock")
+
 type Product struct {
 	ID             int        `json:"id"`
 	SKU            string     `json:"sku"`
@@ -27,6 +30,15 @@ type Product struct {
 	Stock          int        `json:"stock"`
 	IsActive       bool       `json:"is_active"`
 	LastMovementAt *time.Time `json:"last_movement_at"`
+}
+
+type StockMovement struct {
+	ID        int       `json:"id"`
+	ProductID int       `json:"product_id"`
+	Type      string    `json:"type"`
+	Qty       int       `json:"qty"`
+	Note      *string   `json:"note"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func NewProductRepository(db *pgxpool.Pool) *ProductRepository {
@@ -297,4 +309,157 @@ func (r *ProductRepository) DeleteProduct(
 	}
 
 	return nil
+}
+
+func (r *ProductRepository) AdjustStock(
+	ctx context.Context,
+	id int,
+	movementType string,
+	qty int,
+	note string,
+) (int, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin adjustment: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var query string
+	movementType = strings.ToLower(strings.TrimSpace(movementType))
+
+	switch movementType {
+	case "in":
+		query = `
+			update products
+			set stock = stock + $1
+			where id = $2
+			returning stock
+			`
+	case "out":
+		query = `
+			update products
+			set stock = stock - $1
+			where id = $2 and stock >= $1
+			returning stock
+			`
+	default:
+		return 0, fmt.Errorf("invalid movement type: %s", movementType)
+	}
+
+	var newStock int
+	err = tx.QueryRow(ctx, query, qty, id).Scan(&newStock)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			if movementType == "out" {
+				var availableStock int
+				err = tx.QueryRow(
+					ctx,
+					`select stock from products where id = $1`,
+					id,
+				).Scan(&availableStock)
+
+				if errors.Is(err, pgx.ErrNoRows) {
+					return 0, ErrProductNotFound
+				}
+
+				if err != nil {
+					return 0, fmt.Errorf("failed to check available stock: %w", err)
+				}
+
+				return availableStock, ErrInsufficientStock
+			}
+
+			return 0, ErrProductNotFound
+		}
+		return 0, fmt.Errorf("failed to adjust stock: %w", err)
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`
+		insert into stock_movements 
+		(product_id, type, qty, note)
+		values ($1, $2, $3, $4)
+		`,
+		id,
+		movementType,
+		qty,
+		note,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert stock movement: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("failed to commit adjustment: %w", err)
+	}
+
+	return newStock, nil
+}
+
+func (r *ProductRepository) GetStockMovement(
+	ctx context.Context,
+	productID int,
+) ([]StockMovement, error) {
+	var exists bool
+	err := r.db.QueryRow(
+		ctx,
+		`select exists (select 1 from products where id = $1)`,
+		productID,
+	).Scan(&exists)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed check product existence: %w", err)
+	}
+
+	if !exists {
+		return nil, ErrProductNotFound
+	}
+
+	rows, err := r.db.Query(
+		ctx,
+		`
+		select
+			id,
+			product_id,
+			type,
+			qty,
+			note,
+			created_at
+		from stock_movements
+		where product_id = $1
+		order by created_at desc, id desc
+		`,
+		productID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch stock movements: %w", err)
+	}
+	defer rows.Close()
+
+	movements := make([]StockMovement, 0)
+
+	for rows.Next() {
+		var movement StockMovement
+
+		err := rows.Scan(
+			&movement.ID,
+			&movement.ProductID,
+			&movement.Type,
+			&movement.Qty,
+			&movement.Note,
+			&movement.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan stock movement: %w", err)
+		}
+
+		movements = append(movements, movement)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate stock movement: %w", err)
+	}
+
+	return movements, nil
 }

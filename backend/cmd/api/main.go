@@ -39,6 +39,9 @@ func main() {
 	router.Put("/api/products/{id}", productHandler.UpdateProduct)
 	router.Delete("/api/products/{id}", productHandler.DeleteProduct)
 
+	router.Post("/api/products/{id}/stock", productHandler.AdjustStock)
+	router.Get("/api/products/{id}/movements", productHandler.GetMovements)
+
 	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		response := map[string]string{
 			"status": "ok",

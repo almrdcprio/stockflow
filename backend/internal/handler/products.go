@@ -35,6 +35,12 @@ type productCreateRequest struct {
 	Price int    `json:"price"`
 }
 
+type AdjustStockRequest struct {
+	Type string `json:"type"`
+	Qty  int    `json:"qty"`
+	Note string `json:"note"`
+}
+
 func (h *productHandler) ListProducts(
 	w http.ResponseWriter, r *http.Request,
 ) {
@@ -252,4 +258,105 @@ func (h *productHandler) DeleteProduct(
 
 	w.WriteHeader(http.StatusNoContent)
 
+}
+
+func (h *productHandler) AdjustStock(
+	w http.ResponseWriter, r *http.Request,
+) {
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || id < 1 {
+		http.Error(w, "Invalid product ID", http.StatusBadRequest)
+		return
+	}
+
+	var request AdjustStockRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if request.Type != "in" && request.Type != "out" {
+		http.Error(w, "Invalid type! Must be either 'in' or 'out'", http.StatusBadRequest)
+		return
+	}
+
+	if request.Qty <= 0 {
+		http.Error(w, "Quantity must be greater than zero", http.StatusBadRequest)
+		return
+	}
+
+	newStock, err := h.repo.AdjustStock(
+		r.Context(),
+		id,
+		request.Type,
+		request.Qty,
+		request.Note,
+	)
+
+	if err != nil {
+		if errors.Is(err, repository.ErrProductNotFound) {
+			http.Error(w, "Product not found", http.StatusNotFound)
+			return
+		}
+
+		if errors.Is(err, repository.ErrInsufficientStock) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": map[string]any{
+					"code":            "INSUFFICIENT_STOCK",
+					"available_stock": newStock,
+				},
+			})
+			return
+		}
+
+		log.Printf("failed to adjust stock: %v", err)
+		http.Error(w, "failed to adjust stock", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":    id,
+		"type":  request.Type,
+		"qty":   request.Qty,
+		"stock": newStock,
+		"note":  request.Note,
+	})
+
+}
+
+func (h *productHandler) GetMovements(
+	w http.ResponseWriter, r *http.Request,
+) {
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || id <= 0 {
+		http.Error(w, "Invalid product ID", http.StatusBadRequest)
+		return
+	}
+
+	movements, err := h.repo.GetStockMovement(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, repository.ErrProductNotFound) {
+			http.Error(w, "Product not found", http.StatusNotFound)
+			return
+		}
+
+		log.Printf("failed to get stock movements: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"data": movements,
+	}); err != nil {
+		log.Printf("failed to encode stock movements: %v", err)
+	}
 }
